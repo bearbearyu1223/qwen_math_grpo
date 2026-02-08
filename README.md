@@ -124,27 +124,33 @@ uv run python scripts/download_dataset.py
 
 ### 3. Training
 
-**With 2+ GPUs** (vLLM acceleration):
+**With 2+ GPUs** (vLLM acceleration, recommended):
 
 ```bash
 uv run python scripts/run_grpo.py \
     --model-name-or-path Qwen/Qwen2.5-Math-1.5B \
-    --n-grpo-steps 200 \
-    --group-size 8 \
+    --rollout-batch-size 16 \
+    --train-batch-size 16 \
+    --gradient-accumulation-steps 8 \
+    --max-seq-length-train 1024 \
+    --n-grpo-steps 100 \
+    --group-size 4 \
     --output-dir outputs/grpo_model
 ```
 
-**With 1 GPU** (single-GPU mode):
+**With 1 GPU** (single-GPU mode, slower):
 
 ```bash
 uv run python scripts/run_grpo.py \
     --model-name-or-path Qwen/Qwen2.5-Math-1.5B \
     --single-gpu \
     --policy-device cuda:0 \
-    --rollout-batch-size 32 \
-    --train-batch-size 32 \
+    --rollout-batch-size 16 \
+    --train-batch-size 16 \
     --gradient-accumulation-steps 8 \
-    --n-grpo-steps 200 \
+    --max-seq-length-train 512 \
+    --n-grpo-steps 100 \
+    --group-size 4 \
     --output-dir outputs/grpo_model
 ```
 
@@ -153,7 +159,12 @@ uv run python scripts/run_grpo.py \
 ```bash
 uv run python scripts/run_grpo.py \
     --model-name-or-path Qwen/Qwen2.5-Math-1.5B \
-    --n-grpo-steps 200 \
+    --rollout-batch-size 16 \
+    --train-batch-size 16 \
+    --gradient-accumulation-steps 8 \
+    --max-seq-length-train 1024 \
+    --n-grpo-steps 100 \
+    --group-size 4 \
     --wandb-project qwen-math-grpo \
     --output-dir outputs/grpo_model
 ```
@@ -275,6 +286,29 @@ uv run python scripts/run_grpo.py \
 | `--group-size` | Fewer rollouts per question uses less memory |
 
 Reducing batch sizes while increasing gradient accumulation maintains training quality.
+
+### Zombie GPU Processes
+
+If you get OOM errors when re-running training after stopping a previous run (e.g., with Ctrl+C), there may be zombie processes still holding GPU memory:
+
+```text
+Process 8317 has 66.33 GiB memory in use
+```
+
+**Solution**: Kill the zombie processes before starting a new run:
+
+```bash
+# Check what's using GPU memory
+nvidia-smi
+
+# Kill all processes using GPUs
+nvidia-smi --query-compute-apps=pid --format=csv,noheader | xargs -I {} kill -9 {}
+
+# Or kill a specific process
+kill -9 <PID>
+```
+
+**Prevention**: Always check `nvidia-smi` before starting training to ensure GPUs are free.
 
 ## References
 
