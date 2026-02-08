@@ -191,6 +191,31 @@ uv run python scripts/download_model.py
 uv run python scripts/download_model.py --output-dir ./models/qwen-math
 ```
 
+## Plotting Training Metrics
+
+Training metrics are automatically saved to `outputs/grpo_model/training_history.json`. To plot:
+
+```bash
+# Install matplotlib
+uv sync --extra plot
+
+# Plot training metrics
+uv run python scripts/plot_training.py --input outputs/grpo_model/training_history.json
+
+# Save plot to file
+uv run python scripts/plot_training.py --input outputs/grpo_model/training_history.json --output training_plot.png
+
+# Print summary only
+uv run python scripts/plot_training.py --input outputs/grpo_model/training_history.json --summary-only
+```
+
+The plot shows:
+
+- Average reward per step
+- Answer reward (train vs validation)
+- Policy gradient loss
+- Reward range (min/max/mean)
+
 ## Project Structure
 
 ```
@@ -202,6 +227,7 @@ qwen_math_grpo/
 ├── scripts/
 │   ├── run_grpo.py          # Training script
 │   ├── run_math_eval.py     # Evaluation script
+│   ├── plot_training.py     # Plot training metrics
 │   ├── download_dataset.py  # Download MATH dataset
 │   └── download_model.py    # Download Qwen model
 ├── notebooks/

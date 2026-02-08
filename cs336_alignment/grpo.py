@@ -756,6 +756,7 @@ def grpo_train_loop(
 
     # Training metrics
     train_step = 0
+    training_history = []  # Store metrics for plotting
 
     # Main GRPO loop
     for grpo_step in tqdm(range(config.n_grpo_steps), desc="GRPO Steps"):
@@ -843,6 +844,19 @@ def grpo_train_loop(
             f"reward_mean={reward_metadata['reward_mean']:.4f}, "
             f"answer_reward={reward_metadata['answer_reward_mean']:.4f}"
         )
+
+        # Initialize step metrics for this GRPO step
+        step_metrics = {
+            "grpo_step": grpo_step,
+            "reward_mean": reward_metadata["reward_mean"],
+            "reward_std": reward_metadata["reward_std"],
+            "reward_max": reward_metadata["reward_max"],
+            "reward_min": reward_metadata["reward_min"],
+            "answer_reward_mean": reward_metadata["answer_reward_mean"],
+            "format_reward_mean": reward_metadata["format_reward_mean"],
+            "advantage_mean": reward_metadata["advantage_mean"],
+            "advantage_std": reward_metadata["advantage_std"],
+        }
 
         # ====================================================================
         # Step 4: Compute old log-probs (for off-policy training)
@@ -965,6 +979,12 @@ def grpo_train_loop(
                         log_dict["train/clip_fraction"] = avg_clip_fraction
                     wandb_run.log(log_dict)
 
+        # Add loss metrics to step_metrics (use last batch's values)
+        step_metrics["loss"] = avg_loss
+        step_metrics["grad_norm"] = grad_norm.item()
+        if config.loss_type == "grpo_clip":
+            step_metrics["clip_fraction"] = avg_clip_fraction
+
         # ====================================================================
         # Step 6: Validation (periodic)
         # ====================================================================
@@ -1004,6 +1024,19 @@ def grpo_train_loop(
                         "eval_step": grpo_step + 1,
                     })
 
+                # Add validation metrics
+                step_metrics["val_reward"] = val_reward
+
+        # Append step metrics to training history
+        training_history.append(step_metrics)
+
+        # Save training history periodically (every 10 steps)
+        if (grpo_step + 1) % 10 == 0:
+            import json
+            history_path = os.path.join(config.output_dir, "training_history.json")
+            with open(history_path, "w") as f:
+                json.dump(training_history, f, indent=2)
+
         # ====================================================================
         # Step 7: Save checkpoint (periodic)
         # ====================================================================
@@ -1020,6 +1053,13 @@ def grpo_train_loop(
     policy.save_pretrained(final_dir)
     tokenizer.save_pretrained(final_dir)
     logger.info(f"Saved final model to {final_dir}")
+
+    # Save final training history
+    import json
+    history_path = os.path.join(config.output_dir, "training_history.json")
+    with open(history_path, "w") as f:
+        json.dump(training_history, f, indent=2)
+    logger.info(f"Saved training history to {history_path}")
 
     return policy
 

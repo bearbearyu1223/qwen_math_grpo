@@ -30,10 +30,14 @@ vllm = [
 cuda = [
     "flash-attn==2.7.4.post1",
 ]
+plot = [
+    "matplotlib>=3.7.0",
+]
 dev = [
     "pytest>=7.0.0",
     "black>=23.0.0",
     "ruff>=0.1.0",
+    "matplotlib>=3.7.0",
 ]
 
 [build-system]
