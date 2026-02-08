@@ -22,8 +22,9 @@ git clone https://github.com/bearbearyu1223/qwen_math_grpo.git
 cd qwen_math_grpo
 
 # Install dependencies
-uv sync --extra vllm  # NVIDIA GPUs
-uv sync               # Apple Silicon (no vLLM)
+uv sync --extra vllm              # NVIDIA GPUs
+uv sync --extra vllm --extra cuda # A100/H100 (with Flash Attention)
+uv sync                           # Apple Silicon (no vLLM)
 
 # Download dataset
 uv run python scripts/download_dataset.py
