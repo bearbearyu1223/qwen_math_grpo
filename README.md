@@ -1,5 +1,7 @@
 # GRPO Training for Qwen2.5-Math-1.5B
 
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/bearbearyu1223/qwen_math_grpo/blob/main/notebooks/grpo_training_colab.ipynb)
+
 This repository implements Group Relative Policy Optimization (GRPO) for training math reasoning models. GRPO is a policy gradient method that uses group-normalized rewards as advantages to improve model performance without requiring a separate value function.
 
 ## Overview
@@ -281,6 +283,8 @@ qwen_math_grpo/
 │   ├── run_math_eval.py     # Evaluation script
 │   ├── download_dataset.py  # Download MATH dataset
 │   └── download_model.py    # Download Qwen model
+├── notebooks/
+│   └── grpo_training_colab.ipynb  # Colab notebook
 ├── data/
 │   └── math/
 │       ├── train.jsonl      # 12,000 training examples
