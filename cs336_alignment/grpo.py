@@ -617,14 +617,40 @@ def load_policy_into_vllm_instance(policy: PreTrainedModel, llm: "LLM") -> None:
     Load policy model weights into a vLLM instance for inference.
 
     This allows using the updated policy weights with vLLM's fast inference.
+    Supports vLLM v0.6.x and v0.7.x (pinned in pyproject.toml).
 
     Args:
         policy: The HuggingFace policy model with updated weights
         llm: The vLLM instance to update
     """
     state_dict = policy.state_dict()
-    llm_model = llm.llm_engine.model_executor.driver_worker.model_runner.model
-    llm_model.load_weights(state_dict.items())
+
+    # Try different paths for different vLLM versions
+    model = None
+
+    # vLLM v0.6.x - v0.7.x path (primary)
+    try:
+        model = llm.llm_engine.model_executor.driver_worker.model_runner.model
+    except AttributeError:
+        pass
+
+    # vLLM v0.5.x path (fallback)
+    if model is None:
+        try:
+            model = llm.llm_engine.driver_worker.model_runner.model
+        except AttributeError:
+            pass
+
+    if model is not None:
+        model.load_weights(state_dict.items())
+    else:
+        raise RuntimeError(
+            "Cannot load weights into vLLM instance - internal API not found. "
+            "This may be due to vLLM version incompatibility. Options:\n"
+            "  1. Use single-GPU mode: --single-gpu\n"
+            "  2. Reinstall vLLM: uv sync --extra vllm --reinstall\n"
+            "  3. Check that vLLM version is 0.6.x or 0.7.x"
+        )
 
 
 def grpo_train_loop(

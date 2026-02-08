@@ -23,7 +23,9 @@ dependencies = [
 
 [project.optional-dependencies]
 vllm = [
-    "vllm>=0.8.4",
+    # Pin to 0.6.x/0.7.x for weight injection support
+    # vLLM 0.8+ changed internal APIs and broke dynamic weight loading
+    "vllm>=0.6.0,<0.8.0",
 ]
 cuda = [
     "flash-attn==2.7.4.post1",
