@@ -25,9 +25,6 @@ References:
     - DeepSeek R1: https://arxiv.org/abs/2501.12948
 """
 
-# IMPORTANT: Parse arguments and initialize vLLM BEFORE importing torch
-# This allows us to set CUDA_VISIBLE_DEVICES for vLLM before CUDA is initialized
-
 import argparse
 import json
 import logging
@@ -226,71 +223,71 @@ def parse_args():
     return parser.parse_args()
 
 
-def init_vllm_on_device(model_id: str, device: str, seed: int, gpu_memory_utilization: float):
-    """
-    Initialize vLLM on a specific GPU device.
-
-    This must be called BEFORE importing torch to ensure CUDA_VISIBLE_DEVICES
-    takes effect.
-    """
-    # Extract GPU index from device string (e.g., "cuda:1" -> "1")
-    if ":" in device:
-        gpu_id = device.split(":")[1]
-    else:
-        gpu_id = "0"
-
-    logger.info(f"Setting CUDA_VISIBLE_DEVICES={gpu_id} for vLLM")
-    os.environ["CUDA_VISIBLE_DEVICES"] = gpu_id
-
-    # Now import and initialize vLLM - it will only see the specified GPU
-    from vllm import LLM
-
-    logger.info(f"Initializing vLLM with model {model_id}...")
-    llm = LLM(
-        model=model_id,
-        dtype="bfloat16",
-        seed=seed,
-        tensor_parallel_size=1,
-        gpu_memory_utilization=gpu_memory_utilization,
-        trust_remote_code=True,
-    )
-
-    # Restore CUDA_VISIBLE_DEVICES to see all GPUs
-    # This is needed so that torch can use the policy device
-    if "CUDA_VISIBLE_DEVICES" in os.environ:
-        del os.environ["CUDA_VISIBLE_DEVICES"]
-
-    logger.info("vLLM initialized successfully")
-    return llm
-
-
 def main():
     # Parse arguments first (before any CUDA operations)
     args = parse_args()
 
-    # Initialize vLLM BEFORE importing torch if using 2-GPU mode
-    # This ensures CUDA_VISIBLE_DEVICES takes effect
-    vllm_instance = None
-    if not args.single_gpu:
-        logger.info(f"Initializing vLLM on {args.vllm_device} (before loading policy)...")
-        vllm_instance = init_vllm_on_device(
-            model_id=args.model_name_or_path,
-            device=args.vllm_device,
-            seed=args.seed,
-            gpu_memory_utilization=args.gpu_memory_utilization,
-        )
-
-    # NOW import torch and other dependencies that use CUDA
+    # Import torch to initialize CUDA context
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
     from cs336_alignment.grpo import GRPOConfig, grpo_train_loop
     from cs336_alignment.drgrpo_grader import r1_zero_reward_fn
 
-    # Log CUDA device info
-    logger.info(f"CUDA available: {torch.cuda.is_available()}")
-    logger.info(f"CUDA device count: {torch.cuda.device_count()}")
-    for i in range(torch.cuda.device_count()):
-        logger.info(f"  GPU {i}: {torch.cuda.get_device_name(i)}")
+    # Check GPU availability
+    n_gpus = torch.cuda.device_count()
+    logger.info(f"CUDA available: {torch.cuda.is_available()}, device count: {n_gpus}")
+    for i in range(n_gpus):
+        allocated = torch.cuda.memory_allocated(i) / 1024**3
+        logger.info(f"  GPU {i}: {torch.cuda.get_device_name(i)} ({allocated:.2f} GB used)")
+
+    # Determine if we can use vLLM (requires 2+ GPUs)
+    use_vllm = not args.single_gpu and n_gpus >= 2
+    vllm_instance = None
+
+    if args.single_gpu:
+        logger.info("Single-GPU mode requested, vLLM disabled")
+    elif n_gpus < 2:
+        logger.warning(f"Only {n_gpus} GPU(s) detected. Need 2+ GPUs for vLLM mode.")
+        logger.warning("Falling back to single-GPU mode (slower)")
+        use_vllm = False
+    else:
+        # Initialize vLLM on a separate GPU
+        # Extract GPU index from device string (e.g., "cuda:1" -> 1)
+        vllm_gpu_id = int(args.vllm_device.split(":")[-1]) if ":" in args.vllm_device else 1
+        policy_gpu_id = int(args.policy_device.split(":")[-1]) if ":" in args.policy_device else 0
+
+        if vllm_gpu_id == policy_gpu_id:
+            logger.error("vLLM and policy cannot be on the same GPU!")
+            logger.info("Use --single-gpu for single-GPU mode")
+            sys.exit(1)
+
+        logger.info(f"Initializing vLLM on GPU {vllm_gpu_id}...")
+
+        # vLLM 0.6.x doesn't have a direct device parameter, but we can use
+        # CUDA_VISIBLE_DEVICES before importing vLLM. However, this affects
+        # the entire process. Instead, we'll use the init_vllm function from grpo.py
+        # which handles device placement.
+        from cs336_alignment.grpo import init_vllm
+
+        # Note: init_vllm in grpo.py uses gpu_memory_utilization but places on cuda:0
+        # For 2-GPU setup, we need vLLM on GPU 1 and policy on GPU 0
+        # Since we can't easily control vLLM's GPU without CUDA_VISIBLE_DEVICES,
+        # we'll let vLLM use GPU 0 and put policy on GPU 1 instead
+        logger.info("Note: vLLM will use GPU 0, policy will use GPU 1")
+        args.policy_device = f"cuda:{vllm_gpu_id}"  # Swap - policy goes to GPU 1
+
+        vllm_instance = init_vllm(
+            model_id=args.model_name_or_path,
+            device="cuda:0",  # vLLM always uses cuda:0
+            seed=args.seed,
+            gpu_memory_utilization=args.gpu_memory_utilization,
+        )
+
+        # Log memory after vLLM init
+        for i in range(n_gpus):
+            allocated = torch.cuda.memory_allocated(i) / 1024**3
+            reserved = torch.cuda.memory_reserved(i) / 1024**3
+            logger.info(f"  GPU {i} after vLLM: {allocated:.2f} GB allocated, {reserved:.2f} GB reserved")
 
     # Set random seed
     torch.manual_seed(args.seed)
@@ -364,6 +361,8 @@ def main():
     logger.info(f"Group size: {config.group_size}")
     logger.info(f"Loss type: {config.loss_type}")
     logger.info(f"Learning rate: {config.learning_rate}")
+    logger.info(f"Policy device: {args.policy_device}")
+    logger.info(f"vLLM enabled: {use_vllm}")
     logger.info("=" * 60)
 
     # Load policy model
@@ -384,13 +383,12 @@ def main():
     logger.info(f"Policy model loaded on {args.policy_device}")
 
     # Log GPU memory after loading policy
-    if torch.cuda.is_available():
-        for i in range(torch.cuda.device_count()):
-            allocated = torch.cuda.memory_allocated(i) / 1024**3
-            reserved = torch.cuda.memory_reserved(i) / 1024**3
-            logger.info(f"GPU {i} memory after policy load: {allocated:.2f} GB allocated, {reserved:.2f} GB reserved")
+    for i in range(n_gpus):
+        allocated = torch.cuda.memory_allocated(i) / 1024**3
+        reserved = torch.cuda.memory_reserved(i) / 1024**3
+        logger.info(f"  GPU {i} after policy: {allocated:.2f} GB allocated, {reserved:.2f} GB reserved")
 
-    if args.single_gpu:
+    if not use_vllm:
         logger.info("Running in single-GPU mode (using transformers for inference)")
 
     # Initialize wandb (optional)
