@@ -578,13 +578,23 @@ def init_vllm(
 
     Args:
         model_id: HuggingFace model ID or path
-        device: Device string (e.g., "cuda:1")
+        device: Device string (e.g., "cuda:1") - used to extract GPU index
         seed: Random seed for reproducibility
         gpu_memory_utilization: Fraction of GPU memory to use
 
     Returns:
         vLLM LLM instance
     """
+    # Extract GPU index from device string (e.g., "cuda:1" -> "1")
+    if ":" in device:
+        gpu_id = device.split(":")[1]
+    else:
+        gpu_id = "0"
+
+    # Set CUDA_VISIBLE_DEVICES before importing vLLM to place it on the right GPU
+    # vLLM will see this GPU as "cuda:0" from its perspective
+    os.environ["CUDA_VISIBLE_DEVICES"] = gpu_id
+
     from vllm import LLM
 
     # Set random seed
@@ -594,10 +604,9 @@ def init_vllm(
 
     return LLM(
         model=model_id,
-        device=device,
         dtype="bfloat16",
         seed=seed,
-        enable_prefix_caching=True,
+        tensor_parallel_size=1,
         gpu_memory_utilization=gpu_memory_utilization,
         trust_remote_code=True,
     )
