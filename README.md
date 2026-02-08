@@ -132,8 +132,8 @@ uv run python scripts/run_grpo.py \
     --rollout-batch-size 16 \
     --train-batch-size 16 \
     --gradient-accumulation-steps 8 \
-    --max-seq-length-train 1024 \
-    --n-grpo-steps 100 \
+    --max-seq-length-train 5120 \
+    --n-grpo-steps 200 \
     --group-size 4 \
     --output-dir outputs/grpo_model
 ```
