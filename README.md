@@ -213,7 +213,7 @@ qwen_math_grpo/
 
 ### CUDA Out of Memory
 
-If you get `torch.OutOfMemoryError: CUDA out of memory`, reduce batch sizes:
+Gradient checkpointing is enabled by default to reduce memory usage. If you still get `torch.OutOfMemoryError: CUDA out of memory`, reduce batch sizes:
 
 ```bash
 uv run python scripts/run_grpo.py \

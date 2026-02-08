@@ -708,6 +708,12 @@ def grpo_train_loop(
     device = next(policy.parameters()).device
     policy.train()
 
+    # Enable gradient checkpointing to reduce memory usage
+    # This trades computation for memory by recomputing activations during backprop
+    if hasattr(policy, 'gradient_checkpointing_enable'):
+        policy.gradient_checkpointing_enable()
+        logger.info("Gradient checkpointing enabled")
+
     # Create optimizer
     optimizer = torch.optim.AdamW(
         policy.parameters(),
