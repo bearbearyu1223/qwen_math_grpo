@@ -10,6 +10,7 @@ authors = [{ name = "Your Name", email = "your@email.com" }]
 dependencies = [
     "torch>=2.0.0",
     "transformers>=4.50.0",
+    "accelerate>=0.26.0",
     "datasets>=3.0.0",
     "huggingface_hub>=0.20.0",
     "tqdm>=4.67.1",
