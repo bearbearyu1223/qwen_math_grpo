@@ -112,7 +112,6 @@ nvidia-smi --list-gpus
 
 # Install uv
 curl -LsSf https://astral.sh/uv/install.sh | sh
-source ~/.local/bin/env
 
 # Clone and install
 git clone https://github.com/bearbearyu1223/qwen_math_grpo.git
