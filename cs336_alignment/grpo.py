@@ -590,9 +590,11 @@ def init_vllm(
         vLLM LLM instance
     """
     from vllm import LLM
-    from vllm.model_executor import set_random_seed as vllm_set_random_seed
 
-    vllm_set_random_seed(seed)
+    # Set random seed (vLLM picks up torch's seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
 
     # Monkeypatch from TRL to place vLLM on desired device
     world_size_patch = patch("torch.distributed.get_world_size", return_value=1)
