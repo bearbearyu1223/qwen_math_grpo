@@ -70,7 +70,12 @@ uv run python scripts/run_grpo.py \
 ## Evaluation
 
 ```bash
-# Evaluate trained model
+# Evaluate trained model (vLLM - fast, requires NVIDIA GPU)
+uv run python scripts/run_math_eval.py \
+    --model-name-or-path outputs/grpo_model/final \
+    --backend vllm
+
+# Evaluate trained model (transformers - slower, works on CPU/MPS)
 uv run python scripts/run_math_eval.py \
     --model-name-or-path outputs/grpo_model/final \
     --backend transformers
@@ -78,10 +83,11 @@ uv run python scripts/run_math_eval.py \
 # Compare with base model
 uv run python scripts/run_math_eval.py \
     --model-name-or-path Qwen/Qwen2.5-Math-1.5B \
-    --output-path outputs/base_eval.jsonl
+    --output-path outputs/base_eval.jsonl \
+    --backend vllm
 ```
 
-Use `--backend vllm` for faster inference on NVIDIA GPUs, `--num-samples N` for quick tests.
+Use `--num-samples N` for quick tests (e.g., `--num-samples 100`).
 
 ## Lambda Cloud
 
