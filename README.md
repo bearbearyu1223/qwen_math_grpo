@@ -251,19 +251,28 @@ uv run python scripts/run_grpo.py \
     --group-size 8
 ```
 
-For severe OOM, use even smaller values:
+For severe OOM, use even smaller values and limit sequence length:
 
 ```bash
---rollout-batch-size 32 \
---train-batch-size 32 \
---gradient-accumulation-steps 16
+uv run python scripts/run_grpo.py \
+    --model-name-or-path Qwen/Qwen2.5-Math-1.5B \
+    --rollout-batch-size 16 \
+    --train-batch-size 16 \
+    --gradient-accumulation-steps 16 \
+    --max-seq-length-train 512 \
+    --group-size 4 \
+    --n-grpo-steps 100
 ```
 
-**Batch size parameters**:
+**Memory-saving parameters**:
 
-- `rollout-batch-size`: Total responses generated per step (prompts × group_size)
-- `train-batch-size`: Samples processed per optimizer step
-- `gradient-accumulation-steps`: Micro-batch size = train_batch_size / gradient_accumulation_steps
+| Parameter | Description |
+|-----------|-------------|
+| `--rollout-batch-size` | Total responses generated per step (prompts × group_size) |
+| `--train-batch-size` | Samples processed per optimizer step |
+| `--gradient-accumulation-steps` | Micro-batch size = train_batch_size / gradient_accumulation_steps |
+| `--max-seq-length-train` | Truncate sequences longer than this (default: 512) |
+| `--group-size` | Fewer rollouts per question uses less memory |
 
 Reducing batch sizes while increasing gradient accumulation maintains training quality.
 

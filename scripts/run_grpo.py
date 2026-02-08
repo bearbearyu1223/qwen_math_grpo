@@ -178,6 +178,12 @@ def parse_args():
         default=0.85,
         help="GPU memory utilization for vLLM",
     )
+    parser.add_argument(
+        "--max-seq-length-train",
+        type=int,
+        default=512,
+        help="Max sequence length during training (truncate longer sequences)",
+    )
 
     # Other settings
     parser.add_argument(
@@ -339,6 +345,7 @@ def main():
         save_steps=args.save_steps,
         seed=args.seed,
         gpu_memory_utilization=args.gpu_memory_utilization,
+        max_seq_length_train=args.max_seq_length_train,
     )
 
     logger.info("=" * 60)

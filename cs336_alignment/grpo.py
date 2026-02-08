@@ -565,6 +565,7 @@ class GRPOConfig:
     save_steps: int = 50
     seed: int = 42
     gpu_memory_utilization: float = 0.85
+    max_seq_length_train: int = 512  # Truncate sequences longer than this during training
 
 
 def init_vllm(
@@ -873,9 +874,21 @@ def grpo_train_loop(
         # We need: [prompt0_comp0, prompt0_comp1, ..., prompt1_comp0, ...]
         # This is already the correct order from vLLM
 
-        input_ids = tokenized["input_ids"].to(device)
-        labels = tokenized["labels"].to(device)
-        response_mask = tokenized["response_mask"].to(device)
+        input_ids = tokenized["input_ids"]
+        labels = tokenized["labels"]
+        response_mask = tokenized["response_mask"]
+
+        # Truncate long sequences to save memory during training
+        max_len = config.max_seq_length_train
+        if input_ids.shape[1] > max_len:
+            logger.info(f"Truncating sequences from {input_ids.shape[1]} to {max_len} tokens")
+            input_ids = input_ids[:, :max_len]
+            labels = labels[:, :max_len]
+            response_mask = response_mask[:, :max_len]
+
+        input_ids = input_ids.to(device)
+        labels = labels.to(device)
+        response_mask = response_mask.to(device)
 
         # Reshape advantages and rewards to (rollout_batch_size, 1) for broadcasting
         advantages = advantages.to(device).unsqueeze(1)
@@ -929,11 +942,12 @@ def grpo_train_loop(
                     mb_old_log_probs = old_log_probs[mb_indices] if old_log_probs is not None else None
 
                     # Forward pass to get current log probs
+                    # NOTE: return_token_entropy=False to save memory (entropy not used)
                     log_prob_result = get_response_log_probs(
                         model=policy,
                         input_ids=mb_input_ids,
                         labels=mb_labels,
-                        return_token_entropy=True,
+                        return_token_entropy=False,
                     )
                     mb_policy_log_probs = log_prob_result["log_probs"]
 
@@ -953,6 +967,11 @@ def grpo_train_loop(
                     if "clip_fraction" in step_metadata:
                         accumulated_clip_fraction += step_metadata["clip_fraction"].item()
                     n_microbatches += 1
+
+                    # Free memory between microbatches
+                    del log_prob_result, mb_policy_log_probs, loss
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
 
                 # Gradient clipping
                 grad_norm = torch.nn.utils.clip_grad_norm_(

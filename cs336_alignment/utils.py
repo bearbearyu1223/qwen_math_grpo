@@ -131,11 +131,15 @@ def get_response_log_probs(
     input_ids: torch.Tensor,
     labels: torch.Tensor,
     return_token_entropy: bool = False,
+    seq_chunk_size: int = 256,
 ) -> dict[str, torch.Tensor]:
     """
     Get per-token conditional log-probabilities (given the previous tokens) from
     a causal language model, and optionally the entropy of the model's next-token
     distribution.
+
+    Memory-optimized: processes logsumexp in chunks along sequence dimension to
+    avoid materializing the full (batch, seq, vocab) tensor at once.
 
     Args:
         model: PreTrainedModel, HuggingFace model used for scoring (placed on the
@@ -145,7 +149,8 @@ def get_response_log_probs(
         labels: torch.Tensor of shape (batch_size, sequence_length), labels as
             produced by your tokenization method.
         return_token_entropy: bool, If True, also return per-token entropy by
-            calling compute_entropy.
+            calling compute_entropy. WARNING: This is memory-intensive!
+        seq_chunk_size: int, chunk size for processing logsumexp along sequence dim.
 
     Returns:
         dict[str, torch.Tensor]:
@@ -158,9 +163,7 @@ def get_response_log_probs(
     outputs = model(input_ids=input_ids)
     logits = outputs.logits  # (batch_size, seq_length, vocab_size)
 
-    # Memory-efficient log probability computation
-    # Instead of materializing full (batch, seq, vocab) log_softmax tensor,
-    # compute log_probs directly: log_softmax(x)[i] = x[i] - logsumexp(x)
+    batch_size, seq_length, vocab_size = logits.shape
 
     # Handle -100 labels (padding) - temporarily replace with 0
     labels_for_gather = labels.clone()
@@ -171,8 +174,16 @@ def get_response_log_probs(
         logits, dim=-1, index=labels_for_gather.unsqueeze(-1)
     ).squeeze(-1)
 
-    # Compute logsumexp for normalization (avoids materializing full softmax)
-    logsumexp = torch.logsumexp(logits.float(), dim=-1)  # (batch_size, seq_length)
+    # Memory-efficient logsumexp: process in chunks along sequence dimension
+    # This avoids materializing the full (batch, seq, vocab) tensor in float32
+    logsumexp_chunks = []
+    for seq_start in range(0, seq_length, seq_chunk_size):
+        seq_end = min(seq_start + seq_chunk_size, seq_length)
+        chunk_logits = logits[:, seq_start:seq_end, :]  # (batch, chunk_size, vocab)
+        chunk_logsumexp = torch.logsumexp(chunk_logits.float(), dim=-1)
+        logsumexp_chunks.append(chunk_logsumexp)
+
+    logsumexp = torch.cat(logsumexp_chunks, dim=1)  # (batch_size, seq_length)
 
     # log_softmax(x)[i] = x[i] - logsumexp(x)
     log_probs = gathered_logits.float() - logsumexp  # (batch_size, seq_length)
@@ -180,7 +191,13 @@ def get_response_log_probs(
     result = {"log_probs": log_probs}
 
     if return_token_entropy:
+        # WARNING: This is memory-intensive as it requires full vocab probabilities
         token_entropy = compute_entropy(logits)
         result["token_entropy"] = token_entropy
+
+    # Explicitly delete logits to free memory
+    del logits, outputs
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
     return result
