@@ -335,7 +335,7 @@ def main():
         )
         logger.info("vLLM initialized successfully")
     else:
-        logger.warning("Running in single-GPU mode (no vLLM, slower inference)")
+        logger.info("Running in single-GPU mode (using transformers for inference)")
 
     # Initialize wandb (optional)
     wandb_run = None
