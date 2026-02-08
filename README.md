@@ -83,6 +83,68 @@ uv run python scripts/run_math_eval.py \
 
 Use `--backend vllm` for faster inference on NVIDIA GPUs, `--num-samples N` for quick tests.
 
+## Lambda Cloud
+
+Run GRPO training on Lambda Cloud with NVIDIA GPUs for fastest performance.
+
+### Setup
+
+```bash
+# SSH into your Lambda instance
+ssh ubuntu@<your-instance-ip>
+
+# Install uv
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source ~/.local/bin/env
+
+# Clone and install
+git clone https://github.com/bearbearyu1223/qwen_math_grpo.git
+cd qwen_math_grpo
+uv sync --extra vllm
+
+# Download dataset
+uv run python scripts/download_dataset.py
+```
+
+### Training (2 GPUs recommended)
+
+```bash
+# Full training with vLLM acceleration
+uv run python scripts/run_grpo.py \
+    --model-name-or-path Qwen/Qwen2.5-Math-1.5B \
+    --n-grpo-steps 200 \
+    --group-size 8 \
+    --output-dir outputs/grpo_model
+
+# With W&B logging
+uv run python scripts/run_grpo.py \
+    --model-name-or-path Qwen/Qwen2.5-Math-1.5B \
+    --n-grpo-steps 200 \
+    --wandb-project qwen-math-grpo
+```
+
+### Evaluate
+
+```bash
+# Evaluate with vLLM (fast)
+uv run python scripts/run_math_eval.py \
+    --model-name-or-path outputs/grpo_model/final \
+    --backend vllm
+
+# Evaluate base model for comparison
+uv run python scripts/run_math_eval.py \
+    --model-name-or-path Qwen/Qwen2.5-Math-1.5B \
+    --output-path outputs/base_eval.jsonl \
+    --backend vllm
+```
+
+### Download Results
+
+```bash
+# From your local machine
+scp -r ubuntu@<your-instance-ip>:~/qwen_math_grpo/outputs ./lambda_outputs
+```
+
 ## Download Scripts
 
 ```bash
