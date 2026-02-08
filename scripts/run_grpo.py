@@ -286,6 +286,12 @@ def main():
     from cs336_alignment.grpo import GRPOConfig, grpo_train_loop
     from cs336_alignment.drgrpo_grader import r1_zero_reward_fn
 
+    # Log CUDA device info
+    logger.info(f"CUDA available: {torch.cuda.is_available()}")
+    logger.info(f"CUDA device count: {torch.cuda.device_count()}")
+    for i in range(torch.cuda.device_count()):
+        logger.info(f"  GPU {i}: {torch.cuda.get_device_name(i)}")
+
     # Set random seed
     torch.manual_seed(args.seed)
 
@@ -376,6 +382,13 @@ def main():
     )
     policy = policy.to(args.policy_device)
     logger.info(f"Policy model loaded on {args.policy_device}")
+
+    # Log GPU memory after loading policy
+    if torch.cuda.is_available():
+        for i in range(torch.cuda.device_count()):
+            allocated = torch.cuda.memory_allocated(i) / 1024**3
+            reserved = torch.cuda.memory_reserved(i) / 1024**3
+            logger.info(f"GPU {i} memory after policy load: {allocated:.2f} GB allocated, {reserved:.2f} GB reserved")
 
     if args.single_gpu:
         logger.info("Running in single-GPU mode (using transformers for inference)")
