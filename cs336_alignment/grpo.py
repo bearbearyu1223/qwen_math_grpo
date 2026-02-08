@@ -591,6 +591,9 @@ def init_vllm(
     else:
         gpu_id = "0"
 
+    # Save original CUDA_VISIBLE_DEVICES
+    original_cuda_visible_devices = os.environ.get("CUDA_VISIBLE_DEVICES", None)
+
     # Set CUDA_VISIBLE_DEVICES before importing vLLM to place it on the right GPU
     # vLLM will see this GPU as "cuda:0" from its perspective
     os.environ["CUDA_VISIBLE_DEVICES"] = gpu_id
@@ -602,7 +605,7 @@ def init_vllm(
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
 
-    return LLM(
+    llm = LLM(
         model=model_id,
         dtype="bfloat16",
         seed=seed,
@@ -610,6 +613,14 @@ def init_vllm(
         gpu_memory_utilization=gpu_memory_utilization,
         trust_remote_code=True,
     )
+
+    # Restore original CUDA_VISIBLE_DEVICES so policy model operations use correct device
+    if original_cuda_visible_devices is not None:
+        os.environ["CUDA_VISIBLE_DEVICES"] = original_cuda_visible_devices
+    elif "CUDA_VISIBLE_DEVICES" in os.environ:
+        del os.environ["CUDA_VISIBLE_DEVICES"]
+
+    return llm
 
 
 def load_policy_into_vllm_instance(policy: PreTrainedModel, llm: "LLM") -> None:

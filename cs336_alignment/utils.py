@@ -158,23 +158,24 @@ def get_response_log_probs(
     outputs = model(input_ids=input_ids)
     logits = outputs.logits  # (batch_size, seq_length, vocab_size)
 
-    # Compute log probabilities using log_softmax (numerically stable)
-    log_probs_all = F.log_softmax(logits.float(), dim=-1)  # (batch_size, seq_length, vocab_size)
+    # Memory-efficient log probability computation
+    # Instead of materializing full (batch, seq, vocab) log_softmax tensor,
+    # compute log_probs directly: log_softmax(x)[i] = x[i] - logsumexp(x)
 
-    # Gather log probs for the target labels
-    # We need log_probs[batch, position, label[batch, position]]
-    # Use gather to select the log prob of each label
-    # labels shape: (batch_size, seq_length)
-    # We need to handle -100 labels (padding) - temporarily replace with 0, then mask
+    # Handle -100 labels (padding) - temporarily replace with 0
     labels_for_gather = labels.clone()
     labels_for_gather[labels == -100] = 0
 
-    # Gather: select log_probs at the label indices
-    log_probs = torch.gather(
-        log_probs_all,
-        dim=-1,
-        index=labels_for_gather.unsqueeze(-1)
-    ).squeeze(-1)  # (batch_size, seq_length)
+    # Gather logits at label positions: (batch_size, seq_length)
+    gathered_logits = torch.gather(
+        logits, dim=-1, index=labels_for_gather.unsqueeze(-1)
+    ).squeeze(-1)
+
+    # Compute logsumexp for normalization (avoids materializing full softmax)
+    logsumexp = torch.logsumexp(logits.float(), dim=-1)  # (batch_size, seq_length)
+
+    # log_softmax(x)[i] = x[i] - logsumexp(x)
+    log_probs = gathered_logits.float() - logsumexp  # (batch_size, seq_length)
 
     result = {"log_probs": log_probs}
 
