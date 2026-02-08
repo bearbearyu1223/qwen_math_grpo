@@ -85,13 +85,23 @@ Use `--backend vllm` for faster inference on NVIDIA GPUs, `--num-samples N` for 
 
 ## Lambda Cloud
 
-Run GRPO training on Lambda Cloud with NVIDIA GPUs for fastest performance.
+Run GRPO training on Lambda Cloud with NVIDIA GPUs.
 
-### Setup
+### 1. Launch Instance
+
+Choose an instance type on Lambda Cloud:
+
+- **2+ GPUs** (recommended): 2x A100, 2x H100, etc. - enables vLLM acceleration
+- **1 GPU**: Works but slower (uses transformers for inference)
+
+### 2. Setup
 
 ```bash
 # SSH into your Lambda instance
 ssh ubuntu@<your-instance-ip>
+
+# Check available GPUs
+nvidia-smi --list-gpus
 
 # Install uv
 curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -106,27 +116,46 @@ uv sync --extra vllm
 uv run python scripts/download_dataset.py
 ```
 
-### Training (2 GPUs recommended)
+### 3. Training
+
+**With 2+ GPUs** (vLLM acceleration):
 
 ```bash
-# Full training with vLLM acceleration
 uv run python scripts/run_grpo.py \
     --model-name-or-path Qwen/Qwen2.5-Math-1.5B \
     --n-grpo-steps 200 \
     --group-size 8 \
     --output-dir outputs/grpo_model
+```
 
-# With W&B logging
+**With 1 GPU** (single-GPU mode):
+
+```bash
+uv run python scripts/run_grpo.py \
+    --model-name-or-path Qwen/Qwen2.5-Math-1.5B \
+    --single-gpu \
+    --policy-device cuda:0 \
+    --rollout-batch-size 32 \
+    --train-batch-size 32 \
+    --gradient-accumulation-steps 8 \
+    --n-grpo-steps 200 \
+    --output-dir outputs/grpo_model
+```
+
+**With W&B logging** (optional):
+
+```bash
 uv run python scripts/run_grpo.py \
     --model-name-or-path Qwen/Qwen2.5-Math-1.5B \
     --n-grpo-steps 200 \
-    --wandb-project qwen-math-grpo
+    --wandb-project qwen-math-grpo \
+    --output-dir outputs/grpo_model
 ```
 
-### Evaluate
+### 4. Evaluate
 
 ```bash
-# Evaluate with vLLM (fast)
+# Evaluate trained model
 uv run python scripts/run_math_eval.py \
     --model-name-or-path outputs/grpo_model/final \
     --backend vllm
@@ -138,7 +167,7 @@ uv run python scripts/run_math_eval.py \
     --backend vllm
 ```
 
-### Download Results
+### 5. Download Results
 
 ```bash
 # From your local machine
