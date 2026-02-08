@@ -21,6 +21,7 @@ References:
     - PPO: https://arxiv.org/abs/1707.06347
 """
 
+import gc
 import logging
 import os
 from dataclasses import dataclass
@@ -28,6 +29,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Literal
 import torch
 import torch.nn.functional as F
+
+
+def log_gpu_memory(msg: str = "") -> None:
+    """Log current GPU memory usage."""
+    if torch.cuda.is_available():
+        allocated = torch.cuda.memory_allocated() / 1024**3
+        reserved = torch.cuda.memory_reserved() / 1024**3
+        logger.info(f"GPU Memory {msg}: {allocated:.2f} GB allocated, {reserved:.2f} GB reserved")
 from torch import Tensor
 from tqdm import tqdm
 from transformers import (
@@ -913,6 +922,10 @@ def grpo_train_loop(
         # ====================================================================
         rollout_batch_size = len(rollout_responses)
 
+        # Log memory before training
+        if grpo_step == 0:
+            log_gpu_memory("before training loop")
+
         for epoch in range(config.epochs_per_rollout_batch):
             # Shuffle indices for this epoch
             perm = torch.randperm(rollout_batch_size)
@@ -940,6 +953,9 @@ def grpo_train_loop(
                     mb_advantages = advantages[mb_indices]
                     mb_raw_rewards = raw_rewards[mb_indices]
                     mb_old_log_probs = old_log_probs[mb_indices] if old_log_probs is not None else None
+
+                    if grpo_step == 0 and n_microbatches == 0:
+                        log_gpu_memory(f"before microbatch {n_microbatches}")
 
                     # Forward pass to get current log probs
                     # NOTE: return_token_entropy=False to save memory (entropy not used)
@@ -969,9 +985,13 @@ def grpo_train_loop(
                     n_microbatches += 1
 
                     # Free memory between microbatches
-                    del log_prob_result, mb_policy_log_probs, loss
+                    del log_prob_result, mb_policy_log_probs, loss, step_metadata
+                    gc.collect()
                     if torch.cuda.is_available():
                         torch.cuda.empty_cache()
+
+                    if grpo_step == 0:
+                        log_gpu_memory(f"after microbatch {n_microbatches}")
 
                 # Gradient clipping
                 grad_norm = torch.nn.utils.clip_grad_norm_(
@@ -979,9 +999,15 @@ def grpo_train_loop(
                     config.max_grad_norm
                 )
 
+                if grpo_step == 0:
+                    log_gpu_memory("before optimizer.step()")
+
                 # Optimizer step
                 optimizer.step()
                 train_step += 1
+
+                if grpo_step == 0:
+                    log_gpu_memory("after optimizer.step()")
 
                 # Log training metrics
                 avg_loss = accumulated_loss / n_microbatches
