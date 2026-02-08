@@ -25,6 +25,9 @@ References:
     - DeepSeek R1: https://arxiv.org/abs/2501.12948
 """
 
+# IMPORTANT: Parse arguments and initialize vLLM BEFORE importing torch
+# This allows us to set CUDA_VISIBLE_DEVICES for vLLM before CUDA is initialized
+
 import argparse
 import json
 import logging
@@ -32,56 +35,19 @@ import os
 import sys
 from pathlib import Path
 
-import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
-
-# Add parent directory to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from cs336_alignment.grpo import GRPOConfig, grpo_train_loop, init_vllm
-from cs336_alignment.drgrpo_grader import r1_zero_reward_fn
-
+# Setup logging early
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
 
-# Load prompt template
-PROMPT_PATH = Path(__file__).parent.parent / "cs336_alignment" / "prompts" / "r1_zero.prompt"
-with open(PROMPT_PATH) as f:
-    R1_ZERO_PROMPT_TEMPLATE = f.read()
+# Add parent directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
-def load_math_data(data_path: str, num_samples: int | None = None) -> tuple[list[str], list[str]]:
-    """
-    Load MATH dataset and format prompts.
-
-    Args:
-        data_path: Path to JSONL file with MATH examples
-        num_samples: Optional limit on number of samples
-
-    Returns:
-        Tuple of (prompts, answers)
-    """
-    prompts = []
-    answers = []
-
-    with open(data_path) as f:
-        for i, line in enumerate(f):
-            if num_samples is not None and i >= num_samples:
-                break
-            example = json.loads(line)
-            # Format prompt using r1_zero template
-            prompt = R1_ZERO_PROMPT_TEMPLATE.format(question=example["problem"])
-            prompts.append(prompt)
-            answers.append(example["answer"])
-
-    logger.info(f"Loaded {len(prompts)} examples from {data_path}")
-    return prompts, answers
-
-
-def main():
+def parse_args():
+    """Parse command line arguments."""
     parser = argparse.ArgumentParser(description="Train a model using GRPO on MATH dataset")
 
     # Model and data
@@ -251,10 +217,91 @@ def main():
         help="Weights & Biases project name (optional)",
     )
 
-    args = parser.parse_args()
+    return parser.parse_args()
+
+
+def init_vllm_on_device(model_id: str, device: str, seed: int, gpu_memory_utilization: float):
+    """
+    Initialize vLLM on a specific GPU device.
+
+    This must be called BEFORE importing torch to ensure CUDA_VISIBLE_DEVICES
+    takes effect.
+    """
+    # Extract GPU index from device string (e.g., "cuda:1" -> "1")
+    if ":" in device:
+        gpu_id = device.split(":")[1]
+    else:
+        gpu_id = "0"
+
+    logger.info(f"Setting CUDA_VISIBLE_DEVICES={gpu_id} for vLLM")
+    os.environ["CUDA_VISIBLE_DEVICES"] = gpu_id
+
+    # Now import and initialize vLLM - it will only see the specified GPU
+    from vllm import LLM
+
+    logger.info(f"Initializing vLLM with model {model_id}...")
+    llm = LLM(
+        model=model_id,
+        dtype="bfloat16",
+        seed=seed,
+        tensor_parallel_size=1,
+        gpu_memory_utilization=gpu_memory_utilization,
+        trust_remote_code=True,
+    )
+
+    # Restore CUDA_VISIBLE_DEVICES to see all GPUs
+    # This is needed so that torch can use the policy device
+    if "CUDA_VISIBLE_DEVICES" in os.environ:
+        del os.environ["CUDA_VISIBLE_DEVICES"]
+
+    logger.info("vLLM initialized successfully")
+    return llm
+
+
+def main():
+    # Parse arguments first (before any CUDA operations)
+    args = parse_args()
+
+    # Initialize vLLM BEFORE importing torch if using 2-GPU mode
+    # This ensures CUDA_VISIBLE_DEVICES takes effect
+    vllm_instance = None
+    if not args.single_gpu:
+        logger.info(f"Initializing vLLM on {args.vllm_device} (before loading policy)...")
+        vllm_instance = init_vllm_on_device(
+            model_id=args.model_name_or_path,
+            device=args.vllm_device,
+            seed=args.seed,
+            gpu_memory_utilization=args.gpu_memory_utilization,
+        )
+
+    # NOW import torch and other dependencies that use CUDA
+    import torch
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from cs336_alignment.grpo import GRPOConfig, grpo_train_loop
+    from cs336_alignment.drgrpo_grader import r1_zero_reward_fn
 
     # Set random seed
     torch.manual_seed(args.seed)
+
+    # Load prompt template
+    prompt_path = Path(__file__).parent.parent / "cs336_alignment" / "prompts" / "r1_zero.prompt"
+    with open(prompt_path) as f:
+        r1_zero_prompt_template = f.read()
+
+    def load_math_data(data_path: str, num_samples: int | None = None) -> tuple[list[str], list[str]]:
+        """Load MATH dataset and format prompts."""
+        prompts = []
+        answers = []
+        with open(data_path) as f:
+            for i, line in enumerate(f):
+                if num_samples is not None and i >= num_samples:
+                    break
+                example = json.loads(line)
+                prompt = r1_zero_prompt_template.format(question=example["problem"])
+                prompts.append(prompt)
+                answers.append(example["answer"])
+        logger.info(f"Loaded {len(prompts)} examples from {data_path}")
+        return prompts, answers
 
     # Load data
     logger.info("Loading training data...")
@@ -323,18 +370,7 @@ def main():
     policy = policy.to(args.policy_device)
     logger.info(f"Policy model loaded on {args.policy_device}")
 
-    # Initialize vLLM (if not single-GPU mode)
-    vllm_instance = None
-    if not args.single_gpu:
-        logger.info(f"Initializing vLLM on {args.vllm_device}...")
-        vllm_instance = init_vllm(
-            model_id=args.model_name_or_path,
-            device=args.vllm_device,
-            seed=args.seed,
-            gpu_memory_utilization=args.gpu_memory_utilization,
-        )
-        logger.info("vLLM initialized successfully")
-    else:
+    if args.single_gpu:
         logger.info("Running in single-GPU mode (using transformers for inference)")
 
     # Initialize wandb (optional)

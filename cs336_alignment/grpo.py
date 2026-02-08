@@ -574,30 +574,22 @@ def init_vllm(
     gpu_memory_utilization: float = 0.85,
 ) -> "LLM":
     """
-    Initialize a vLLM instance for fast inference on a specific device.
+    Initialize a vLLM instance for fast inference.
+
+    Note: CUDA_VISIBLE_DEVICES cannot be used to place vLLM on a specific GPU
+    after PyTorch/CUDA has been initialized. vLLM will use GPU 0 by default.
+    The gpu_memory_utilization parameter controls how much GPU memory vLLM uses,
+    leaving room for the policy model and training.
 
     Args:
         model_id: HuggingFace model ID or path
-        device: Device string (e.g., "cuda:1") - used to extract GPU index
+        device: Device string (ignored - vLLM uses GPU 0 after CUDA init)
         seed: Random seed for reproducibility
-        gpu_memory_utilization: Fraction of GPU memory to use
+        gpu_memory_utilization: Fraction of GPU memory to use (default 0.85)
 
     Returns:
         vLLM LLM instance
     """
-    # Extract GPU index from device string (e.g., "cuda:1" -> "1")
-    if ":" in device:
-        gpu_id = device.split(":")[1]
-    else:
-        gpu_id = "0"
-
-    # Save original CUDA_VISIBLE_DEVICES
-    original_cuda_visible_devices = os.environ.get("CUDA_VISIBLE_DEVICES", None)
-
-    # Set CUDA_VISIBLE_DEVICES before importing vLLM to place it on the right GPU
-    # vLLM will see this GPU as "cuda:0" from its perspective
-    os.environ["CUDA_VISIBLE_DEVICES"] = gpu_id
-
     from vllm import LLM
 
     # Set random seed
@@ -605,22 +597,19 @@ def init_vllm(
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
 
-    llm = LLM(
+    # Note: vLLM will use GPU 0 since CUDA is already initialized
+    # We limit memory usage to leave room for policy model and training
+    logger.info(f"Initializing vLLM with gpu_memory_utilization={gpu_memory_utilization}")
+
+    return LLM(
         model=model_id,
         dtype="bfloat16",
         seed=seed,
         tensor_parallel_size=1,
         gpu_memory_utilization=gpu_memory_utilization,
         trust_remote_code=True,
+        enforce_eager=True,  # Disable CUDA graphs to save memory
     )
-
-    # Restore original CUDA_VISIBLE_DEVICES so policy model operations use correct device
-    if original_cuda_visible_devices is not None:
-        os.environ["CUDA_VISIBLE_DEVICES"] = original_cuda_visible_devices
-    elif "CUDA_VISIBLE_DEVICES" in os.environ:
-        del os.environ["CUDA_VISIBLE_DEVICES"]
-
-    return llm
 
 
 def load_policy_into_vllm_instance(policy: PreTrainedModel, llm: "LLM") -> None:
