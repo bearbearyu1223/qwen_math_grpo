@@ -209,6 +209,38 @@ qwen_math_grpo/
 └── data/math/               # Dataset (after download)
 ```
 
+## Troubleshooting
+
+### CUDA Out of Memory
+
+If you get `torch.OutOfMemoryError: CUDA out of memory`, reduce batch sizes:
+
+```bash
+uv run python scripts/run_grpo.py \
+    --model-name-or-path Qwen/Qwen2.5-Math-1.5B \
+    --rollout-batch-size 64 \
+    --train-batch-size 64 \
+    --gradient-accumulation-steps 32 \
+    --n-grpo-steps 200 \
+    --group-size 8
+```
+
+For severe OOM, use even smaller values:
+
+```bash
+--rollout-batch-size 32 \
+--train-batch-size 32 \
+--gradient-accumulation-steps 16
+```
+
+**Batch size parameters**:
+
+- `rollout-batch-size`: Total responses generated per step (prompts × group_size)
+- `train-batch-size`: Samples processed per optimizer step
+- `gradient-accumulation-steps`: Micro-batch size = train_batch_size / gradient_accumulation_steps
+
+Reducing batch sizes while increasing gradient accumulation maintains training quality.
+
 ## References
 
 - [DeepSeekMath: Pushing the Limits of Mathematical Reasoning](https://arxiv.org/abs/2402.03300)
