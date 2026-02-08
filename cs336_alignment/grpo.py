@@ -26,8 +26,6 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Literal
-from unittest.mock import patch
-
 import torch
 import torch.nn.functional as F
 from torch import Tensor
@@ -578,8 +576,6 @@ def init_vllm(
     """
     Initialize a vLLM instance for fast inference on a specific device.
 
-    Uses monkeypatching to place vLLM on a device separate from the training policy.
-
     Args:
         model_id: HuggingFace model ID or path
         device: Device string (e.g., "cuda:1")
@@ -591,26 +587,20 @@ def init_vllm(
     """
     from vllm import LLM
 
-    # Set random seed (vLLM picks up torch's seed)
+    # Set random seed
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
 
-    # Monkeypatch from TRL to place vLLM on desired device
-    world_size_patch = patch("torch.distributed.get_world_size", return_value=1)
-    profiling_patch = patch(
-        "vllm.worker.worker.Worker._assert_memory_footprint_increased_during_profiling",
-        return_value=None
+    return LLM(
+        model=model_id,
+        device=device,
+        dtype="bfloat16",
+        seed=seed,
+        enable_prefix_caching=True,
+        gpu_memory_utilization=gpu_memory_utilization,
+        trust_remote_code=True,
     )
-
-    with world_size_patch, profiling_patch:
-        return LLM(
-            model=model_id,
-            device=device,
-            dtype=torch.bfloat16,
-            enable_prefix_caching=True,
-            gpu_memory_utilization=gpu_memory_utilization,
-        )
 
 
 def load_policy_into_vllm_instance(policy: PreTrainedModel, llm: "LLM") -> None:
